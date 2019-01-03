@@ -1,0 +1,283 @@
+Tasks:
+Quantitative Analysis - Backtesting Investment Portfolios:
+* Use reproductive code based on selection criteria to realize quarterly investments.
+* Use Quantmod package to extract and calculate ratios from three financial statements.
+* Select top 10 performance stocks of each industry quarterly from 1980 to 2017.
+* Design portfolios according to ratios of different investment perspective.
+* Improve portfolio annual returns by 3.1 percent compare to benchmark of S&P 500.
+
+Skills：
+  Basic:
+    * data manipulation
+    * vectorize calculation
+    * Apply methods
+    * 
+  Advanced:
+    * 
+  
+
+STEP 0: set up target data
+Get Online datasets
+```{r}
+library(quantmod)
+library(tictoc)
+local=getwd()
+setwd(local)
+start=Sys.time()
+dat= readRDS('datasets.RDS')
+dat_temp= dat
+
+new_dates= c("1988-03")
+years=c(1988:2017)
+
+month=c("03","06","09","12")
+for(i in years){
+  for(j in month){
+    new_dates=c(new_dates,paste(i,j,sep="-"))
+  }
+}
+new_dates=as.character(new_dates)[2:length(new_dates)]
+
+new_date= c(198803)
+years=c(1988:2017)
+month=c("03","06","09","12")
+for(i in years){
+  for(j in month){
+    new_date=c(new_date,paste(i,j,sep=""))
+  }
+}
+new_date=as.integer(new_date)[2:length(new_date)]
+
+```
+
+
+
+Methods for Ratio groups in 8 consecutive terms
+```{r}
+### Break line After get a table with stocks as rows, period as columns
+clean_up=function(dat){
+  dat[is.na(dat) |is.infinite(dat)]=0
+  return(dat)
+}
+getROC <- Vectorize(function(x){
+  ROC_temp      <-dat[dat$PRIME==x,]$ROC
+  if (length(ROC_temp)<8){
+    return(0)
+  }
+  inside<- ROC_temp + 1
+  ROC8<- prod(inside)^(1/8)-1
+  ROC8[is.na(ROC8) | is.infinite(ROC8)] = 0 
+  return(ROC8)
+})
+getROA <- Vectorize(function(x){
+  ROA_temp      <-dat[dat$PRIME==x,]$ROA
+  if (length(ROA_temp)<8){
+    return(0)
+  }
+  value<- ROA_temp + 1
+  ROA8<- prod(value)^(1/8)-1
+  ROA8=clean_up(ROA8)
+  return(ROA8)
+})
+
+filter_portfolio=function(ratio,tick){
+  df_=data.frame(ratio,tick)
+  df_=df_[order(df_$ratio,decreasing = TRUE),]
+  result=rbind(head(df_,10),tail(df_,10))
+  return(result)
+}
+
+getCFOA <- Vectorize(function(x){
+  CFOA_temp      <-dat[dat$PRIME==x,]$`Free Cash Flow`
+  if (length(CFOA_temp)<8){
+    return(0)
+  }
+  value=sum(CFOA_temp)/dat[dat$PRIME==x,]$`Total Assets`[1]
+  value=clean_up(value)
+  return(value)
+})
+
+getMS <- Vectorize(function(x){
+  MS_temp     <-dat[dat$PRIME==x,]$GM
+  if (length(MS_temp)<8){
+    return(0)
+  }
+  value=mean(MS_temp)/sd(MS_temp)
+  value=clean_up(value)
+  return(value)
+})
+
+getMG <- Vectorize(function(x){
+  MG_temp      <-dat[dat$PRIME==x,]$GM
+  if (length(MG_temp)<8){
+    return(0)
+  }
+  value=(1+(MG_temp[2]/MG_temp[1]))*(1+(MG_temp[3]/MG_temp[2]))*(1+(MG_temp[4]/MG_temp[3]))*
+    (1+(MG_temp[5]/MG_temp[4]))*(1+(MG_temp[6]/MG_temp[5]))*(1+(MG_temp[7]/MG_temp[6]))*(1+(MG_temp[8]/MG_temp[7]))
+  value=value^(1/7)-1
+  value=clean_up(value)
+  return(value)
+})
+```
+
+
+STEP 1
+Period
+```{r}
+time=new_date[1:8]
+STEP1=function(time){
+  df=subset(dat_temp, dat_temp$Date>=time[1] & dat_temp$Date<=time[8])
+  filter=aggregate(Date~PRIME,df,NROW)
+  tick=filter[filter$Date ==8,]$PRIME
+  #STEP 1 getPROBM within loop
+  # PROBM :  GPMI, AQI, LVGI, TATA, 
+  dat=subset(df,df$PRIME %in% tick &df$Date %in% c(time[7],time[8]))
+  dat$GPMI_ = (dat$`Gross Profit`/dat$Revenue)
+  dat$AQI_ = (dat$`Total Assets` - dat$`Total Current Assets` - (dat$`Gross Property, Plant And Equipment` + dat$`Accumulated Depreciation`))/dat$`Total Assets`
+  dat$LVGI_ = (dat$`Shares Outstanding (Eop)` * dat$`Total Debt Per Share`)/dat$`Total Assets`
+  dat$TATA_ = (dat$`Operating Income` - dat$`Cash Flow From Operations`)/dat$`Total Assets`
+  a = subset(dat,Date == time[7])
+  b = subset(dat,Date == time[8])
+  c = merge(a,b,by='PRIME')
+  c$gpmi = c$GPMI_.x/c$GPMI_.y
+  c$aqi = c$AQI_.x/c$AQI_.y
+  c$sgi = c$Revenue.x/c$Revenue.y
+  c$depi = c$`Depreciation, Depletion And Amortization.x`/c$`Depreciation, Depletion And Amortization.y`
+  c$sgai = c$`Selling, General, & Admin. Expense.y`/c$`Selling, General, & Admin. Expense.x`
+  c$lvgi = c$LVGI_.y/c$LVGI_.x
+  c$tata = c$TATA_.y/c$TATA_.x
+  for(i in 58:64){
+    c[,i]=clean_up(c[,i])
+  }
+  c$total = c$gpmi+c$aqi+c$sgi+c$depi+c$sgai+c$lvgi+c$tata
+  df3= subset(c,total <= 7 & total >= 0, c('PRIME','total'))
+  tick = df3$PRIME
+  return(tick)
+}
+
+```
+
+STEP 2
+```{r}
+
+STEP2=function(tick,time){
+  df=dat_temp[dat_temp$Date>=time[1] & dat_temp$Date<=time[8],]
+  df2=subset(df, df$PRIME %in% tick)
+  dat=df2
+  ROC         <- dat$`Operating Income`/(dat$`Gross Property, Plant And Equipment` +
+                                           dat$`Accumulated Depreciation` +
+                                           dat$`Total Current Assets` -
+                                           dat$`Total Current Liabilities`)
+  ROC[is.na(ROC) | is.infinite(ROC)] <- 0
+  dat$ROC=ROC
+  ROC<-getROC(tick)
+  o1=filter_portfolio(ROC,tick)
+  ROA=dat$`Net Income`/dat$`Total Assets`
+  ROA=clean_up(ROA)
+  dat$ROA=ROA
+  ROA=getROA(tick)
+  o2=filter_portfolio(ROA,tick)
+  CFOA=getCFOA(tick)
+  o3=filter_portfolio(CFOA,tick)
+  GM=dat$`Gross Profit`/dat$Revenue
+  dat$GM=GM
+  
+  MG=getMG(tick)
+  MS=getMS(tick)
+  o4=filter_portfolio(MG,tick)
+  o5=filter_portfolio(MS,tick)
+  table=rbind(o1,o2,o3,o4,o5)
+  tickers=as.character(table$tick)
+  return(tickers)
+}
+```
+
+
+```{r}
+df4=matrix(nrow=100,ncol=113)
+for(j in 8:length(new_date)){
+  time=new_date[(j-7):(j+1)]
+  # df used for ratios calculation
+  ticker=STEP1(time)
+  tickers=STEP2(ticker,time)
+  returns=c()
+  for(i in 1:100){
+    tryCatch({
+      
+      price=getSymbols(tickers[i],auto.assign = FALSE,from='1988-03-01',to='2017-12-29')[,6]
+      return(price)
+    },error=function(e){
+      return(NA)
+    })
+    tryCatch({
+      v=as.vector(last(price[new_dates[j]]))
+    },error=function(e){
+      return(NA)
+    })
+    tryCatch({
+      v2=as.vector(last(price[new_dates[j+1]]))
+      ratio=(v2-v)/v
+      return(ratio)
+    },error=function(e){
+      return(NA)
+    })
+    returns=c(returns,ratio)
+  }
+  returns[is.na(returns)]=0
+  port_return=c()
+  port_return[1]=mean(returns[1:10])
+  port_return[2]=mean(returns[11:20])
+  port_return[3]=mean(returns[21:30])
+  port_return[4]=mean(returns[31:40])
+  port_return[5]=mean(returns[41:50])
+  port_return[6]=mean(returns[51:60])
+  port_return[7]=mean(returns[61:70])
+  port_return[8]=mean(returns[71:80])
+  port_return[9]=mean(returns[81:90])
+  port_return[10]=mean(returns[91:100])
+  df4[,j-7]=port_return
+}
+df4=clean_up(df4)
+df5=sapply(1:112,function(x){return(rank(df4[,x]))})
+
+count=function(df,num){
+  count_list=c()
+  for(i in 1:nrow(df)){
+    count=0
+    for(j in 1:ncol(df)){
+      if(df[i,j]==num){
+        count=count+1
+      }
+    }
+    count_list=c(count_list,count)
+  }
+  return(count_list)
+}
+```
+
+
+
+
+```{r}
+### After get a table with stocks as rows, period as columns
+Portfolio=c("roc1","roc2","roa1","roa2","cfoa1","cfoa2","mg1","mg2","ms1","ms2")
+Pos=sapply(1:10,function(x){return(length(which(df4[x,]>0)))})
+Neg=sapply(1:10,function(x){return(length(which(df4[x,]<0)))})
+Wins=c(count(df5,1))
+Lost=c(count(df5,10))
+
+Rank=sapply(1:10,function(x){return(mean(df5[x,]))})
+
+Gmean=sapply(1:10,function(x){
+  v=df4[x,]
+  v=v+1
+  return(prod(v)^(1/112)-1)
+})
+Amean=sapply(1:10,function(x){v=df4[x,]
+return(mean(v))})
+
+final_df=data.frame(Portfolio,Pos,Neg,Rank,Wins,Lost,Gmean,Amean)
+final_df
+
+```
+
